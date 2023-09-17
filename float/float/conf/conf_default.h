@@ -18,9 +18,19 @@
 #define APPCONF_FLOAT_KI 0.005
 #endif
 
-// Mahony KP
+// Pitch KP
 #ifndef APPCONF_FLOAT_MAHONY_KP
 #define APPCONF_FLOAT_MAHONY_KP 2
+#endif
+
+// Roll KP
+#ifndef APPCONF_FLOAT_MAHONY_KP_ROLL
+#define APPCONF_FLOAT_MAHONY_KP_ROLL 1
+#endif
+
+// Yaw KP
+#ifndef APPCONF_FLOAT_MAHONY_KP_YAW
+#define APPCONF_FLOAT_MAHONY_KP_YAW 1
 #endif
 
 // Accelerometer Confidence Decay

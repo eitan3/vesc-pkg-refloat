@@ -534,7 +534,9 @@ static void configure(data *d) {
 	d->do_handtest = false;
 
 	d->balance_filter.acc_confidence_decay = d->float_conf.bf_accel_confidence_decay;
-	d->balance_filter.kp = d->float_conf.mahony_kp;
+	d->balance_filter.kp_pitch = d->float_conf.mahony_kp;
+	d->balance_filter.kp_roll = d->float_conf.mahony_kp_roll;
+	d->balance_filter.kp_yaw = d->float_conf.mahony_kp_yaw;
 }
 
 static void reset_vars(data *d) {
@@ -2682,6 +2684,8 @@ static void cmd_tune_defaults(data *d){
 	d->float_conf.kp2 = APPCONF_FLOAT_KP2;
 	d->float_conf.ki = APPCONF_FLOAT_KI;
 	d->float_conf.mahony_kp = APPCONF_FLOAT_MAHONY_KP;
+	d->float_conf.mahony_kp_roll = APPCONF_FLOAT_MAHONY_KP_ROLL;
+	d->float_conf.mahony_kp_yaw = APPCONF_FLOAT_MAHONY_KP_YAW;
 	d->float_conf.bf_accel_confidence_decay = APPCONF_FLOAT_BF_ACCEL_CONFIDENCE_DECAY;
 	d->float_conf.kp_brake = APPCONF_FLOAT_KP_BRAKE;
 	d->float_conf.kp2_brake = APPCONF_FLOAT_KP2_BRAKE;

@@ -52,7 +52,10 @@ void balance_filter_update(float *gyro_xyz, float *accel_xyz, float dt, BalanceF
 	// Compute feedback only if accelerometer abs(vector)is not too small to avoid a division
 	// by a small number
 	if (accel_norm > 0.01) {
-		float two_kp = 2.0 * data->kp * calculate_acc_confidence(accel_norm, data);
+		float accel_confidence = calculate_acc_confidence(accel_norm, data);
+		float two_kp_pitch = 2.0 * data->kp_pitch * accel_confidence;
+		float two_kp_roll = 2.0 * data->kp_roll * accel_confidence;
+		float two_kp_yaw = 2.0 * data->kp_yaw * accel_confidence;
 
 		// Normalise accelerometer measurement
 		float recip_norm = inv_sqrt(ax * ax + ay * ay + az * az);
@@ -71,9 +74,9 @@ void balance_filter_update(float *gyro_xyz, float *accel_xyz, float dt, BalanceF
 		float halfez = (ax * halfvy - ay * halfvx);
 
 		// Apply proportional feedback
-		gx += two_kp * halfex;
-		gy += two_kp * halfey;
-		gz += two_kp * halfez;
+		gx += two_kp_roll * halfex;
+		gy += two_kp_pitch * halfey;
+		gz += two_kp_yaw * halfez;
 	}
 
 	// Integrate rate of change of quaternion

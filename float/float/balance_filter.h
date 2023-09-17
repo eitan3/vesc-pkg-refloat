@@ -10,7 +10,9 @@ typedef struct {
 
 	// parameters
 	float acc_confidence_decay;
-	float kp;
+	float kp_pitch;
+	float kp_roll;
+	float kp_yaw;
 } BalanceFilterData;
 
 void balance_filter_init(BalanceFilterData *data);
