@@ -535,7 +535,6 @@ static void configure(data *d) {
 
 	d->balance_filter.acc_confidence_decay = d->float_conf.bf_accel_confidence_decay;
 	d->balance_filter.kp = d->float_conf.mahony_kp;
-	d->balance_filter.ki = 0;
 }
 
 static void reset_vars(data *d) {
