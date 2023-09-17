@@ -18,6 +18,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "balance_filter.h"
+
 #include "vesc_c_if.h"
 
 #include "conf/datatypes.h"
@@ -141,7 +143,7 @@ typedef struct {
 	bool duty_beeping;
 
 	// IMU data for the balancing filter
-	ATTITUDE_INFO balance_filter;
+	BalanceFilterData balance_filter;
 
 	// Runtime values read from elsewhere
 	float pitch_angle, last_pitch_angle, roll_angle, abs_roll_angle, abs_roll_angle_sin, last_gyro_y;
@@ -1655,7 +1657,7 @@ static void set_current(data *d, float current){
 static void imu_ref_callback(float *acc, float *gyro, float *mag, float dt) {
 	UNUSED(mag);
 	data *d = (data*)ARG;
-	VESC_IF->ahrs_update_mahony_imu(gyro, acc, dt, &d->balance_filter);
+	balance_filter_update(gyro, acc, dt, &d->balance_filter);
 }
 
 static void float_thd(void *arg) {
@@ -1707,7 +1709,7 @@ static void float_thd(void *arg) {
 
 		// True pitch is derived from the secondary IMU filter running with kp=0.2
 		d->true_pitch_angle = RAD2DEG_f(VESC_IF->imu_get_pitch());
-		d->pitch_angle = RAD2DEG_f(VESC_IF->ahrs_get_pitch(&d->balance_filter));
+		d->pitch_angle = RAD2DEG_f(balance_filter_get_pitch(&d->balance_filter));
 		if (d->is_flywheel_mode) {
 			// flip sign and use offsets
 			d->true_pitch_angle = d->flywheel_pitch_offset - d->true_pitch_angle;
@@ -3284,7 +3286,7 @@ INIT_FUN(lib_info *info) {
 		buzzer_init();
 	}
 
-	VESC_IF->ahrs_init_attitude_info(&d->balance_filter);
+	balance_filter_init(&d->balance_filter);
 	VESC_IF->imu_set_read_callback(imu_ref_callback);
 
 	d->thread = VESC_IF->spawn(float_thd, 2048, "Float Main", d);

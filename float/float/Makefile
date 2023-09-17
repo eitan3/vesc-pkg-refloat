@@ -2,7 +2,7 @@ VESC_TOOL ?= vesc_tool
 
 TARGET = float
 
-SOURCES = float.c conf/buffer.c conf/confparser.c conf/confxml.c
+SOURCES = balance_filter.c float.c conf/buffer.c conf/confparser.c conf/confxml.c
 
 ADD_TO_CLEAN = conf/confxml.h conf/confxml.c
 
