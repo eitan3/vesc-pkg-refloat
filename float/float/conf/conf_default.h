@@ -23,6 +23,11 @@
 #define APPCONF_FLOAT_MAHONY_KP 2
 #endif
 
+// Accelerometer Confidence Decay
+#ifndef APPCONF_FLOAT_BF_ACCEL_CONFIDENCE_DECAY
+#define APPCONF_FLOAT_BF_ACCEL_CONFIDENCE_DECAY 0.02
+#endif
+
 // Angle P (Braking)
 #ifndef APPCONF_FLOAT_KP_BRAKE
 #define APPCONF_FLOAT_KP_BRAKE 1
