@@ -208,7 +208,7 @@ typedef struct {
 
 	// Feature: Flywheel
 	bool is_flywheel_mode, flywheel_abort, flywheel_allow_abort;
-	float flywheel_pitch_offset, flywheel_roll_offset, flywheel_konami_timer, flywheel_konami_pitch, flywheel_fault_adc1, flywheel_fault_adc2;
+	float flywheel_pitch_offset, flywheel_roll_offset, flywheel_konami_timer, flywheel_konami_pitch;
 	int flywheel_konami_state;
 
 	// Feature: Handtest
@@ -676,6 +676,11 @@ bool is_engaged(const data *d) {
 		}
 	}
 
+	// Keep the board engaged in flywheel mode
+	if (d->is_flywheel_mode) {
+		return true;
+	}
+
 	return false;
 }
 
@@ -724,7 +729,7 @@ static bool check_faults(data *d){
 
 		// Check switch
 		// Switch fully open
-		if (d->footpad_sensor.state == FS_NONE) {
+		if (d->footpad_sensor.state == FS_NONE && !d->is_flywheel_mode) {
 			if (!disable_switch_faults) {
 				if((1000.0 * (d->current_time - d->fault_switch_timer)) > d->float_conf.fault_delay_switch_full){
 					d->state = FAULT_SWITCH_FULL;
@@ -807,7 +812,7 @@ static bool check_faults(data *d){
 		}
 
 		if (d->is_flywheel_mode && d->flywheel_allow_abort) {
-			if (d->footpad_sensor.adc1 > (d->flywheel_fault_adc1 * ADC_HAND_PRESS_SCALE) && d->footpad_sensor.adc2 > (d->flywheel_fault_adc2 * ADC_HAND_PRESS_SCALE)) {
+			if (d->footpad_sensor.adc1 > (d->float_conf.fault_adc1 * ADC_HAND_PRESS_SCALE) && d->footpad_sensor.adc2 > (d->float_conf.fault_adc1 * ADC_HAND_PRESS_SCALE)) {
 				d->state = FAULT_SWITCH_HALF;
 				d->flywheel_abort = true;
 				return true;
@@ -2859,9 +2864,6 @@ static void cmd_flywheel_toggle(data *d, unsigned char *cfg, int len)
 		d->flywheel_abort = false;
 
 		// Temp store ADC Fault Thresholds
-		d->flywheel_fault_adc1 = d->float_conf.fault_adc1;
-		d->flywheel_fault_adc2 = d->float_conf.fault_adc2;
-
 		// Tighter startup/fault tolerances
 		d->startup_pitch_tolerance = 0.2;
 		d->float_conf.startup_pitch_tolerance = 0.2;
@@ -2873,8 +2875,6 @@ static void cmd_flywheel_toggle(data *d, unsigned char *cfg, int len)
 		}
 		d->float_conf.fault_delay_pitch = 50; // 50ms delay should help filter out IMU noise
 		d->float_conf.fault_delay_roll = 50;  // 50ms delay should help filter out IMU noise
-		d->float_conf.fault_adc1 = 0;
-		d->float_conf.fault_adc2 = 0;
 		d->surge_enable = false;
 
 		// Aggressive P with some D (aka Rate-P) for Mahony kp=0.3
