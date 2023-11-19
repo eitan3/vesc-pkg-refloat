@@ -90,10 +90,11 @@ typedef enum {
 } SetpointAdjustmentType;
 
 typedef enum {
-	OFF = 0,
-	HALF,
-	ON
-} SwitchState;
+	FS_NONE = 0,
+	FS_LEFT = 1,
+	FS_RIGHT = 2,
+	FS_BOTH = 3
+} FootpadSensorState;
 
 typedef struct{
 	float a0, a1, a2, b1, b2;
@@ -153,7 +154,7 @@ typedef struct {
 	float adc1, adc2;
 	float throttle_val;
 	float max_duty_with_margin;
-	SwitchState switch_state;
+	FootpadSensorState footpad_sensor_state;
 
 	// Feature: ATR (Adaptive Torque Response)
 	float atr_on_step_size, atr_off_step_size;
@@ -666,28 +667,47 @@ static float get_setpoint_adjustment_step_size(data *d) {
 	return 0;
 }
 
-// Read ADCs and determine switch state
-static SwitchState check_adcs(data *d) {
-	// Calculate switch state from ADC values
-	if (d->float_conf.fault_adc1 == 0 && d->float_conf.fault_adc2 == 0) { // No Switch
-		return ON;
-	} else if (d->float_conf.fault_adc2 == 0) { // Single switch on ADC1
+// Read ADCs and determine footpad sensor state
+static FootpadSensorState footpad_sensor_state_evaluate(data *d) {
+	// Calculate sensor state from ADC values
+	if (d->float_conf.fault_adc1 == 0 && d->float_conf.fault_adc2 == 0) { // No sensors
+		return FS_BOTH;
+	} else if (d->float_conf.fault_adc2 == 0) { // Single sensor on ADC1
 		if (d->adc1 > d->float_conf.fault_adc1) {
-			return ON;
+			return FS_BOTH;
 		}
-	} else if (d->float_conf.fault_adc1 == 0) { // Single switch on ADC2
+	} else if (d->float_conf.fault_adc1 == 0) { // Single sensor on ADC2
 		if (d->adc2 > d->float_conf.fault_adc2) {
-			return ON;
+			return FS_BOTH;
 		}
-	} else { // Double switch
-		if (d->adc1 > d->float_conf.fault_adc1 && d->adc2 > d->float_conf.fault_adc2) {
-			return ON;
-		} else if (d->adc1 > d->float_conf.fault_adc1 || d->adc2 > d->float_conf.fault_adc2) {
-			return HALF;
+	} else { // Double sensor
+		if (d->adc1 > d->float_conf.fault_adc1) {
+			if (d->adc2 > d->float_conf.fault_adc2) {
+				return FS_BOTH;
+			} else {
+				return FS_LEFT;
+			}
+		} else {
+			if (d->adc2 > d->float_conf.fault_adc2) {
+				return FS_RIGHT;
+			}
 		}
 	}
 
-	return OFF;
+	return FS_NONE;
+}
+
+static int footpad_sensor_state_to_switch_compat(FootpadSensorState v) {
+	switch (v) {
+	case FS_BOTH:
+		return 2;
+	case FS_LEFT:
+	case FS_RIGHT:
+		return 1;
+	case FS_NONE:
+	default:
+		return 0;
+	}
 }
 
 // Fault checking order does not really matter. From a UX perspective, switch should be before angle.
@@ -722,7 +742,7 @@ static bool check_faults(data *d){
 				d->fault_angle_roll_timer = d->current_time;
 			}
 		}
-		if (d->switch_state == ON) {
+		if (d->footpad_sensor_state == FS_BOTH) {
 			// allow turning it off by engaging foot sensors
 			d->state = FAULT_SWITCH_HALF;
 			return true;
@@ -735,7 +755,7 @@ static bool check_faults(data *d){
 
 		// Check switch
 		// Switch fully open
-		if (d->switch_state == OFF) {
+		if (d->footpad_sensor_state == FS_NONE) {
 			if (!disable_switch_faults) {
 				if((1000.0 * (d->current_time - d->fault_switch_timer)) > d->float_conf.fault_delay_switch_full){
 					d->state = FAULT_SWITCH_FULL;
@@ -761,7 +781,7 @@ static bool check_faults(data *d){
 		// Feature: Reverse-Stop
 		if(d->setpointAdjustmentType == REVERSESTOP){
 			//  Taking your foot off entirely while reversing? Ignore delays
-			if (d->switch_state == OFF) {
+			if (d->footpad_sensor_state == FS_NONE) {
 				d->state = FAULT_SWITCH_FULL;
 				return true;
 			}
@@ -790,7 +810,7 @@ static bool check_faults(data *d){
 
 		// Switch partially open and stopped
 		if(!d->float_conf.fault_is_dual_switch) {
-			if((d->switch_state == HALF || d->switch_state == OFF) && d->abs_erpm < d->float_conf.fault_adc_half_erpm){
+			if(d->footpad_sensor_state != FS_BOTH && d->abs_erpm < d->float_conf.fault_adc_half_erpm){
 				if ((1000.0 * (d->current_time - d->fault_switch_half_timer)) > d->float_conf.fault_delay_switch_half){
 					d->state = FAULT_SWITCH_HALF;
 					return true;
@@ -1777,19 +1797,19 @@ static void float_thd(void *arg) {
 		if ((d->abs_yaw_change > 0.04) && !unchanged)	// don't count tiny yaw changes towards aggregate
 			d->yaw_aggregate += d->yaw_change;
 
-		d->switch_state = check_adcs(d);
+		d->footpad_sensor_state = footpad_sensor_state_evaluate(d);
 
-		if (d->switch_state == HALF) {
+		if (d->footpad_sensor_state == FS_LEFT || d->footpad_sensor_state == FS_RIGHT) {
 			// 5 seconds after stopping we allow starting with a single sensor (e.g. for jump starts)
 			bool is_simple_start = d->float_conf.startup_simplestart_enabled &&
 				(d->current_time - d->disengage_timer > 5);
 
 			if (d->float_conf.fault_is_dual_switch || is_simple_start) {
-				d->switch_state = ON;
+				d->footpad_sensor_state = FS_BOTH;
 			}
 		}
 
-		if (d->switch_state == OFF && d->state <= RUNNING_TILTBACK && d->abs_erpm > d->switch_warn_buzz_erpm) {
+		if (d->footpad_sensor_state == FS_NONE && d->state <= RUNNING_TILTBACK && d->abs_erpm > d->switch_warn_buzz_erpm) {
 			// If we're at riding speed and the switch is off => ALERT the user
 			// set force=true since this could indicate an imminent shutdown/nosedive
 			beep_on(d, true);
@@ -2133,7 +2153,7 @@ static void float_thd(void *arg) {
 			// Check for valid startup position and switch state
 			if (fabsf(d->pitch_angle) < d->startup_pitch_tolerance &&
 				fabsf(d->roll_angle) < d->float_conf.startup_roll_tolerance && 
-				d->switch_state == ON) {
+				d->footpad_sensor_state == FS_BOTH) {
 				reset_vars(d);
 				break;
 			}
@@ -2147,7 +2167,7 @@ static void float_thd(void *arg) {
 				}
 			}
 			// Push-start aka dirty landing Part II
-			if(d->float_conf.startup_pushstart_enabled && (d->abs_erpm > 1000) && (d->switch_state == ON)) {
+			if(d->float_conf.startup_pushstart_enabled && (d->abs_erpm > 1000) && d->footpad_sensor_state == FS_BOTH) {
 				if ((fabsf(d->pitch_angle) < 45) && (fabsf(d->roll_angle) < 45)) {
 					// 45 to prevent board engaging when upright or laying sideways
 					// 45 degree tolerance is more than plenty for tricks / extreme mounts
@@ -2317,7 +2337,7 @@ static void send_realtime_data(data *d){
 		state = RUNNING_FLYWHEEL;
 	}
 	send_buffer[ind++] = (state & 0xF) + (d->setpointAdjustmentType << 4);
-	state = d->switch_state;
+	state = footpad_sensor_state_to_switch_compat(d->footpad_sensor_state);
 	if (d->do_handtest) {
 		state |= 0x8;
 	}
@@ -2375,7 +2395,7 @@ static void cmd_send_all_data(data *d, unsigned char mode){
 		send_buffer[ind++] = state;
 
 		// passed switch-state includes bit3 for handtest, and bits4..7 for beep reason
-		state = d->switch_state;
+		state = footpad_sensor_state_to_switch_compat(d->footpad_sensor_state);
 		if (d->do_handtest) {
 			state |= 0x8;
 		}
