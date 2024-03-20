@@ -151,9 +151,6 @@ typedef struct {
     float mahony_kp_roll;
     float mahony_kp_yaw;
     float bf_accel_confidence_decay;
-    float kp_brake;
-    float kp2_brake;
-    uint16_t kp_brake_erpm;
     uint16_t hertz;
     float fault_pitch;
     float fault_roll;
@@ -204,9 +201,6 @@ typedef struct {
     float booster_angle;
     float booster_ramp;
     float booster_current;
-    float brkbooster_angle;
-    float brkbooster_ramp;
-    float brkbooster_current;
     float torquetilt_start_current;
     float torquetilt_angle_limit;
     float torquetilt_on_speed;

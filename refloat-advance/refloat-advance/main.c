@@ -150,12 +150,6 @@ typedef struct {
     float switch_warn_beep_erpm;
     bool traction_control;
 
-    // PID Brake Scaling
-    float kp_brake_scale;  // Used for brakes when riding forwards, and accel when riding backwards
-    float kp2_brake_scale;
-    float kp_accel_scale;  // Used for accel when riding forwards, and brakes when riding backwards
-    float kp2_accel_scale;
-
     // Darkride aka upside down mode:
     bool is_upside_down_started;  // dark ride has been engaged
     bool enable_upside_down;  // dark ride mode is enabled (10 seconds after fault)
@@ -379,12 +373,6 @@ static void reset_vars(data *d) {
     d->softstart_pid_limit = 0;
     d->startup_pitch_tolerance = d->float_conf.startup_pitch_tolerance;
     d->surge_adder = 0;
-
-    // PID Brake Scaling
-    d->kp_brake_scale = 1.0;
-    d->kp2_brake_scale = 1.0;
-    d->kp_accel_scale = 1.0;
-    d->kp2_accel_scale = 1.0;
 
     // Turntilt:
     d->last_yaw_angle = 0;
@@ -1249,31 +1237,6 @@ static void refloat_thd(void *arg) {
                 }
             }
 
-            // Prepare Brake Scaling (ramp scale values as needed for smooth transitions)
-            if (d->motor.abs_erpm < 500) {
-                // All scaling should roll back to 1.0x when near a stop for a smooth stand-still
-                // and back-forth transition
-                d->kp_brake_scale = 0.01 + 0.99 * d->kp_brake_scale;
-                d->kp2_brake_scale = 0.01 + 0.99 * d->kp2_brake_scale;
-                d->kp_accel_scale = 0.01 + 0.99 * d->kp_accel_scale;
-                d->kp2_accel_scale = 0.01 + 0.99 * d->kp2_accel_scale;
-
-            } else if (d->motor.erpm > 0) {
-                // Once rolling forward, brakes should transition to scaled values
-                d->kp_brake_scale = 0.01 * d->float_conf.kp_brake + 0.99 * d->kp_brake_scale;
-                d->kp2_brake_scale = 0.01 * d->float_conf.kp2_brake + 0.99 * d->kp2_brake_scale;
-                d->kp_accel_scale = 0.01 + 0.99 * d->kp_accel_scale;
-                d->kp2_accel_scale = 0.01 + 0.99 * d->kp2_accel_scale;
-
-            } else {
-                // Once rolling backward, the NEW brakes (we will use kp_accel) should transition to
-                // scaled values
-                d->kp_brake_scale = 0.01 + 0.99 * d->kp_brake_scale;
-                d->kp2_brake_scale = 0.01 + 0.99 * d->kp2_brake_scale;
-                d->kp_accel_scale = 0.01 * d->float_conf.kp_brake + 0.99 * d->kp_accel_scale;
-                d->kp2_accel_scale = 0.01 * d->float_conf.kp2_brake + 0.99 * d->kp2_accel_scale;
-            }
-
             // Do PID maths
             d->proportional = d->setpoint - d->balance_pitch;
             bool tail_down = sign(d->proportional) != d->motor.erpm_sign;
@@ -1290,16 +1253,7 @@ static void refloat_thd(void *arg) {
                 d->integral = d->integral * 0.9;
             }
 
-            // Apply P Brake Scaling
-            float scaled_kp;
-            // Choose appropriate scale based on board angle (this accomodates backwards riding)
-            if (d->proportional < 0) {
-                scaled_kp = d->float_conf.kp * d->kp_brake_scale;
-            } else {
-                scaled_kp = d->float_conf.kp * d->kp_accel_scale;
-            }
-
-            new_pid_value = scaled_kp * d->proportional + d->integral;
+            new_pid_value = d->float_conf.kp * d->proportional + d->integral;
 
             // Start Rate PID and Booster portion a few cycles later, after the start clicks have
             // been emitted this keeps the start smooth and predictable
@@ -1308,15 +1262,7 @@ static void refloat_thd(void *arg) {
                 // Rate P (Angle + Rate, rather than Angle-Rate Cascading)
                 float rate_prop = -d->gyro[1];
 
-                float scaled_rate_p;
-                // Choose appropriate scale based on board angle (this accomodates backwards riding)
-                if (rate_prop < 0) {
-                    scaled_rate_p = d->float_conf.kp2 * d->kp2_brake_scale;
-                } else {
-                    scaled_rate_p = d->float_conf.kp2 * d->kp2_accel_scale;
-                }
-
-                d->rate_p = scaled_rate_p * rate_prop;
+                d->rate_p = d->float_conf.kp2 * rate_prop;
 
                 // Apply Booster (Now based on True Pitch)
                 // Braketilt excluded to allow for soft brakes that strengthen when near tail-drag
@@ -1324,15 +1270,9 @@ static void refloat_thd(void *arg) {
                 float abs_proportional = fabsf(true_proportional);
 
                 float booster_current, booster_angle, booster_ramp;
-                if (tail_down) {
-                    booster_current = d->float_conf.brkbooster_current;
-                    booster_angle = d->float_conf.brkbooster_angle;
-                    booster_ramp = d->float_conf.brkbooster_ramp;
-                } else {
-                    booster_current = d->float_conf.booster_current;
-                    booster_angle = d->float_conf.booster_angle;
-                    booster_ramp = d->float_conf.booster_ramp;
-                }
+                booster_current = d->float_conf.booster_current;
+                booster_angle = d->float_conf.booster_angle;
+                booster_ramp = d->float_conf.booster_ramp;
 
                 // Make booster a bit stronger at higher speed (up to 2x stronger when braking)
                 const int boost_min_erpm = 3000;
@@ -1804,9 +1744,6 @@ static void cmd_handtest(data *d, unsigned char *cfg) {
         d->mc_current_max = d->mc_current_min = 7;
         // Disable I-term and all tune modifiers and tilts
         d->float_conf.ki = 0;
-        d->float_conf.kp_brake = 1;
-        d->float_conf.kp2_brake = 1;
-        d->float_conf.brkbooster_angle = 100;
         d->float_conf.booster_angle = 100;
         d->float_conf.torquetilt_strength = 0;
         d->float_conf.torquetilt_strength_regen = 0;
@@ -1854,17 +1791,6 @@ static void cmd_booster(data *d, unsigned char *cfg) {
         d->float_conf.booster_current = 0;
     } else {
         d->float_conf.booster_current = 8 + h1 * 2;
-    }
-
-    split(cfg[2], &h1, &h2);
-    d->float_conf.brkbooster_angle = h1 + 5;
-    d->float_conf.brkbooster_ramp = h2 + 2;
-
-    split(cfg[3], &h1, &h2);
-    if (h1 == 0) {
-        d->float_conf.brkbooster_current = 0;
-    } else {
-        d->float_conf.brkbooster_current = 8 + h1 * 2;
     }
 
     beep_alert(d, 1, false);
@@ -1981,10 +1907,10 @@ static void cmd_runtime_tune(data *d, unsigned char *cfg, int len) {
         d->float_conf.torquetilt_off_speed = offspd + 3;
     }
     if (len >= 17) {
-        split(cfg[16], &h1, &h2);
-        d->float_conf.kp_brake = ((float) h1 + 1) / 10;
-        d->float_conf.kp2_brake = ((float) h2) / 10;
-        beep_alert(d, 1, 1);
+        //split(cfg[16], &h1, &h2);
+        //d->float_conf.kp_ brake = ((float) h1 + 1) / 10;
+        //d->float_conf.kp2_ brake = ((float) h2) / 10;
+        //beep_alert(d, 1, 1);
     }
 
     reconfigure(d);
@@ -1998,15 +1924,10 @@ static void cmd_tune_defaults(data *d) {
     d->float_conf.mahony_kp_roll = CFG_DFLT_MAHONY_KP_ROLL;
     d->float_conf.mahony_kp_yaw = CFG_DFLT_MAHONY_KP_YAW;
     d->float_conf.bf_accel_confidence_decay = CFG_DFLT_BF_ACCEL_CONFIDENCE_DECAY;
-    d->float_conf.kp_brake = CFG_DFLT_KP_BRAKE;
-    d->float_conf.kp2_brake = CFG_DFLT_KP2_BRAKE;
     d->float_conf.ki_limit = CFG_DFLT_KI_LIMIT;
     d->float_conf.booster_angle = CFG_DFLT_BOOSTER_ANGLE;
     d->float_conf.booster_ramp = CFG_DFLT_BOOSTER_RAMP;
     d->float_conf.booster_current = CFG_DFLT_BOOSTER_CURRENT;
-    d->float_conf.brkbooster_angle = CFG_DFLT_BRKBOOSTER_ANGLE;
-    d->float_conf.brkbooster_ramp = CFG_DFLT_BRKBOOSTER_RAMP;
-    d->float_conf.brkbooster_current = CFG_DFLT_BRKBOOSTER_CURRENT;
     d->float_conf.turntilt_strength = CFG_DFLT_TURNTILT_STRENGTH;
     d->float_conf.turntilt_angle_limit = CFG_DFLT_TURNTILT_ANGLE_LIMIT;
     d->float_conf.turntilt_start_angle = CFG_DFLT_TURNTILT_START_ANGLE;
@@ -2295,9 +2216,6 @@ static void cmd_flywheel_toggle(data *d, unsigned char *cfg, int len) {
 
         // Disable I-term and all tune modifiers and tilts
         d->float_conf.ki = 0;
-        d->float_conf.kp_brake = 1;
-        d->float_conf.kp2_brake = 1;
-        d->float_conf.brkbooster_angle = 100;
         d->float_conf.booster_angle = 100;
         d->float_conf.torquetilt_strength = 0;
         d->float_conf.torquetilt_strength_regen = 0;
