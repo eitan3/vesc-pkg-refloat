@@ -1,0 +1,8 @@
+*.d
+conf_default.h
+confparser.c
+confparser.h
+refloat-advance/conf/conf_general.h
+refloat-advance/refloat-advance.lisp
+README-pkg.md
+ui.qml
