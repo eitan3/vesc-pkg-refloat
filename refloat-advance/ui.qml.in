@@ -465,11 +465,17 @@ Item {
                     debugTurnTiltSetpoint.rValue = dv.getFloat32(ind); ind += 4;
                     debugRemoteTiltSetpoint.rValue = dv.getFloat32(ind); ind += 4;
 
+                    debugTuneA_Current.rValue = dv.getFloat32(ind); ind += 4;
+                    debugTuneB_Current.rValue = dv.getFloat32(ind); ind += 4;
+                    debugTuneC_Current.rValue = dv.getFloat32(ind); ind += 4;
+                    debugTuneA_Booster.rValue = dv.getFloat32(ind); ind += 4;
+                    debugTuneB_Booster.rValue = dv.getFloat32(ind); ind += 4;
+                    debugTuneC_Booster.rValue = dv.getFloat32(ind); ind += 4;
+
                     debugRequestedCurrent.rValue = dv.getFloat32(ind); ind += 4;
                     debugFilteredCurrent.rValue = dv.getFloat32(ind); ind += 4;
                     debugAtrAccDiff.rValue = dv.getFloat32(ind); ind += 4;
                     debugAtrSpeedBoost.value = Math.round(dv.getFloat32(ind) * 100); ind += 4;
-                    debugBoosterCurrent.rValue = dv.getFloat32(ind); ind += 4;
                 }
 
                 if (hasCharging) {
@@ -3407,11 +3413,13 @@ Item {
                             spacing: 5
                             clip: true
 
-                            RealValue {id: debugRequestedCurrent; label: "Requested current"; unit: "A";}
+                            RealValue {id: debugTuneA_Current; label: "Tune A Current"; unit: "A";}
+                            RealValue {id: debugTuneB_Current; label: "Tune B Current"; unit: "A";}
+                            RealValue {id: debugTuneC_Current; label: "Tune C Current"; unit: "A";}
+                            RealValue {id: debugRequestedCurrent; label: "Interpolated current"; unit: "A";}
                             RealValue {id: debugFilteredCurrent; label: "Torque (filt. current)"; unit: "A";}
                             RealValue {id: debugAtrAccDiff; label: "ATR Accel. diff.";}
                             Value {id: debugAtrSpeedBoost; label: "ATR Speed Boost"; unit: "%"; value: "0"}
-                            RealValue {id: debugBoosterCurrent; label: "Booster current"; unit: "A";}
                             Value {id: debugRemoteInput; label: "Remote input"; unit: "%";}
                         }
 
@@ -3419,6 +3427,10 @@ Item {
                             width: parent.width / 2
                             spacing: 5
                             clip: true
+
+                            RealValue {id: debugTuneA_Booster; label: "Booster A Current"; unit: "A";}
+                            RealValue {id: debugTuneB_Booster; label: "Booster B Current"; unit: "A";}
+                            RealValue {id: debugTuneC_Booster; label: "Booster C Current"; unit: "A";}
 
                             RealValue {id: debugAtrSetpoint; label: "ATR setpoint"; unit: "°";}
                             RealValue {id: debugBrakeTiltSetpoint; label: "Brake Tilt setpoint"; unit: "°";}

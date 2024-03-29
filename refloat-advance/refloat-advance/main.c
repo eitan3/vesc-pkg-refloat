@@ -123,6 +123,21 @@ typedef struct {
 
     FootpadSensor footpad_sensor;
 
+	// Asymmetric Tune
+    float tuneA_current;
+    float tuneB_current;
+	float tuneB_weight;
+	float tuneB_weight_target;
+	float asym_max_accel_b;
+	uint32_t asym_max_erpm_b;
+    float tuneC_current;
+	float tuneC_weight;
+	float tuneC_weight_target;
+	float asym_max_accel_c;
+	uint32_t asym_max_erpm_c;
+	float tuneA_booster_current, tuneB_booster_current, tuneC_booster_current;
+	float tunea_transition_step_size, tuneb_transition_step_size, tunec_transition_step_size;
+
     // Feature: Turntilt
     float last_yaw_angle, yaw_angle, abs_yaw_change, last_yaw_change, yaw_change, yaw_aggregate;
     float turntilt_boost_per_erpm, yaw_aggregate_target;
@@ -130,13 +145,12 @@ typedef struct {
     // Rumtime state values
     State state;
 
-    float proportional;
-    float integral;
-    float rate_p;
+    float proportional, true_proportional, abs_proportional;
+    float integral_a, integral_b, integral_c;
+    float rate_p_a, rate_p_b, rate_p_c;
     float pid_value;
 
     float setpoint, setpoint_target, setpoint_target_interpolated;
-    float applied_booster_current;
     float noseangling_interpolated, inputtilt_interpolated;
     float turntilt_target, turntilt_interpolated;
     float current_time;
@@ -279,6 +293,9 @@ static void configure(data *d) {
     d->turntilt_step_size = d->float_conf.turntilt_speed / d->float_conf.hertz;
     d->noseangling_step_size = d->float_conf.noseangling_speed / d->float_conf.hertz;
     d->inputtilt_step_size = d->float_conf.inputtilt_speed / d->float_conf.hertz;
+	d->tunea_transition_step_size = d->float_conf.tune_a_transition_speed / d->float_conf.hertz;
+	d->tuneb_transition_step_size = d->float_conf.tune_b_transition_speed / d->float_conf.hertz;
+	d->tunec_transition_step_size = d->float_conf.tune_c_transition_speed / d->float_conf.hertz;
 
     d->surge_angle = d->float_conf.surge_angle;
     d->surge_angle2 = d->float_conf.surge_angle * 2;
@@ -344,6 +361,27 @@ static void configure(data *d) {
         d->tiltback_variable_max_erpm = 100000;
     }
 
+	// Asymmetric Tune
+	if (d->float_conf.asym_max_accel_b < d->float_conf.asym_min_accel_b)
+		d->asym_max_accel_b = 0.1;
+	else 
+		d->asym_max_accel_b = d->float_conf.asym_max_accel_b - d->float_conf.asym_min_accel_b;
+
+	if (d->float_conf.asym_max_erpm_b < d->float_conf.asym_min_erpm_b)
+		d->asym_max_erpm_b = 1000;
+	else 
+		d->asym_max_erpm_b = d->float_conf.asym_max_erpm_b - d->float_conf.asym_min_erpm_b;
+	
+	if (d->float_conf.asym_max_accel_c < d->float_conf.asym_min_accel_c)
+		d->asym_max_accel_c = 0.1;
+	else 
+		d->asym_max_accel_c = d->float_conf.asym_max_accel_c - d->float_conf.asym_min_accel_c;
+
+	if (d->float_conf.asym_max_erpm_c < d->float_conf.asym_min_erpm_c)
+		d->asym_max_erpm_c = 1000;
+	else 
+		d->asym_max_erpm_c = d->float_conf.asym_max_erpm_c - d->float_conf.asym_min_erpm_c;
+
     d->beeper_enabled = d->float_conf.is_beeper_enabled;
 
     konami_init(&d->flywheel_konami, flywheel_konami_sequence, sizeof(flywheel_konami_sequence));
@@ -360,7 +398,6 @@ static void reset_vars(data *d) {
     d->setpoint = d->balance_pitch;
     d->setpoint_target_interpolated = d->balance_pitch;
     d->setpoint_target = 0;
-    d->applied_booster_current = 0;
     d->noseangling_interpolated = 0;
     d->inputtilt_interpolated = 0;
     d->turntilt_target = 0;
@@ -368,8 +405,12 @@ static void reset_vars(data *d) {
     d->brake_timeout = 0;
     d->traction_control = false;
     d->pid_value = 0;
-    d->rate_p = 0;
-    d->integral = 0;
+    d->rate_p_a = 0;
+    d->rate_p_b = 0;
+    d->rate_p_c = 0;
+    d->integral_a = 0;
+    d->integral_b = 0;
+    d->integral_c = 0;
     d->softstart_pid_limit = 0;
     d->startup_pitch_tolerance = d->float_conf.startup_pitch_tolerance;
     d->surge_adder = 0;
@@ -384,6 +425,16 @@ static void reset_vars(data *d) {
     // RC Move:
     d->rc_steps = 0;
     d->rc_current = 0;
+
+	// Asymmetric Tune
+	d->tuneB_weight_target = 0;
+	d->tuneC_weight_target = 0;
+    d->tuneA_current = 0;
+    d->tuneB_current = 0;
+    d->tuneC_current = 0;
+    d->tuneA_booster_current = 0;
+    d->tuneB_booster_current = 0;
+    d->tuneC_booster_current = 0;
 
     state_engage(&d->state);
 }
@@ -658,7 +709,9 @@ static void calculate_setpoint_target(data *d) {
                     d->state.sat = SAT_NONE;
                     d->reverse_total_erpm = 0;
                     d->setpoint_target = 0;
-                    d->integral = 0;
+                    d->integral_a = 0;
+                    d->integral_b = 0;
+                    d->integral_c = 0;
                 }
             }
         }
@@ -1013,6 +1066,161 @@ static void apply_turntilt(data *d) {
     d->setpoint += d->turntilt_interpolated;
 }
 
+static void calculate_transition_weights(data *d) {
+    // Calculate current weight target for Tune B (blend between Tune (A) & Tune (B))
+    float abs_accel = fabsf(d->motor.acceleration);
+	float tuneB_weight_target = 0.0; // 0 = Tune (A), 1 = Tune (B)
+	bool enable_tune = d->float_conf.tune_b_only_for_brakes ? d->motor.braking : true;
+	if (enable_tune) 
+	{
+		// calculate how much weight to give to Tune (B) based on acceleration
+		if (d->float_conf.tunes_mixing_b == ACCELERATION_BASED) {
+			if (abs_accel - d->float_conf.asym_min_accel_b > 0) 
+			{
+				tuneB_weight_target = fminf(abs_accel - d->float_conf.asym_min_accel_b, d->asym_max_accel_b) / d->asym_max_accel_b;
+			}
+		}
+		// calculate how much weight to give to Tune (B) based on ERPM
+		else if (d->float_conf.tunes_mixing_b == ERPM_BASED) {
+			if (d->motor.abs_erpm - d->float_conf.asym_min_erpm_b > 0) 
+			{
+				tuneB_weight_target = fminf(d->motor.abs_erpm - d->float_conf.asym_min_erpm_b, d->asym_max_erpm_b) / d->asym_max_erpm_b;
+			}
+		}
+	}
+
+	// Calculate tuneB_weight and step size for interpolation (cow_ss = current out weight step size)
+	float cow_ss = tuneB_weight_target > d->tuneB_weight_target ? d->tuneb_transition_step_size : d->tunea_transition_step_size;
+	if (fabsf(tuneB_weight_target - d->tuneB_weight) <= cow_ss) {
+		d->tuneB_weight = tuneB_weight_target;
+	} else if (tuneB_weight_target - d->tuneB_weight > 0) {
+		d->tuneB_weight += cow_ss;
+	} else {
+		d->tuneB_weight -= cow_ss;
+	}
+
+	// Set d->tuneB_weight_target to the new value
+	d->tuneB_weight_target = tuneB_weight_target;
+
+	// Calculate current weight target for Tune C (blend between Tune (A) & Tune (C))
+	float tuneC_weight_target = 0.0; // 0 = Tune (A), 1 = Tune (C)
+	enable_tune = d->float_conf.tune_c_only_for_brakes ? d->motor.braking : true;
+	if (enable_tune) 
+	{
+		// calculate how much weight to give to Tune (C) based on acceleration
+		if (d->float_conf.tunes_mixing_c == ACCELERATION_BASED) {
+			if (abs_accel - d->float_conf.asym_min_accel_c > 0) 
+			{
+				tuneC_weight_target = fminf(abs_accel - d->float_conf.asym_min_accel_c, d->asym_max_accel_c) / d->asym_max_accel_c;
+			}
+		}
+		// calculate how much weight to give to Tune (C) based on ERPM
+		else if (d->float_conf.tunes_mixing_c == ERPM_BASED) {
+			if (d->motor.abs_erpm - d->float_conf.asym_min_erpm_c > 0) 
+			{
+				tuneC_weight_target = fminf(d->motor.abs_erpm - d->float_conf.asym_min_erpm_c, d->asym_max_erpm_c) / d->asym_max_erpm_c;
+			}
+		}
+	}
+
+	// Calculate tuneC_weight and step size for interpolation (cow_ss = current out weight step size)
+	cow_ss = tuneC_weight_target > d->tuneC_weight_target ? d->tunec_transition_step_size : d->tunea_transition_step_size;
+	if (fabsf(tuneC_weight_target - d->tuneC_weight) <= cow_ss) {
+		d->tuneC_weight = tuneC_weight_target;
+	} else if (tuneC_weight_target - d->tuneC_weight > 0) {
+		d->tuneC_weight += cow_ss;
+	} else {
+		d->tuneC_weight -= cow_ss;
+	}
+
+	// Set d->tuneC_weight_target to the new value
+	d->tuneC_weight_target = tuneC_weight_target;
+}
+
+// Apply Booster (Now based on True Pitch)
+static float calc_booster(data *d, float booster_current, float booster_angle, float booster_ramp) {
+    // Make booster a bit stronger at higher speed (up to 2x stronger when braking)
+    const int boost_min_erpm = 3000;
+    if (d->motor.abs_erpm > boost_min_erpm) {
+        float speedstiffness = fminf(1, (d->motor.abs_erpm - boost_min_erpm) / 10000);
+        bool tail_down = sign(d->proportional) != d->motor.erpm_sign;
+        if (tail_down) {
+            // use higher current at speed when braking
+            booster_current += booster_current * speedstiffness;
+        } else {
+            // when accelerating, we reduce the booster start angle as we get faster
+            // strength remains unchanged
+            float angledivider = 1 + speedstiffness;
+            booster_angle /= angledivider;
+        }
+    }
+
+    if (d->abs_proportional > booster_angle) {
+        if (d->abs_proportional - booster_angle < booster_ramp) {
+            booster_current *= sign(d->true_proportional) *
+                ((d->abs_proportional - booster_angle) / booster_ramp);
+        } else {
+            booster_current *= sign(d->true_proportional);
+        }
+    } else {
+        booster_current = 0;
+    }
+    return booster_current;
+}
+
+static float calc_tune_out_current(
+    data* d, float kp, float kp2, float ki, float ki_limit, float booster_angle, float booster_ramp, float booster_current, 
+    float out_filter, float max_brake, float prev_current,
+    float* integral, float* rate_p, float* out_booster_current
+) {
+    // PID maths
+    *integral = *integral + d->proportional * ki;
+
+    // Apply I term Filter
+    if (ki_limit > 0 && fabsf(*integral) > ki_limit) {
+        *integral = ki_limit * sign(*integral);
+    }
+    // Quickly ramp down integral component during reverse stop
+    if (d->state.sat == SAT_REVERSESTOP) {
+        *integral = *integral * 0.9;
+    }
+
+    float new_pid_value = 0;
+    new_pid_value = kp * d->proportional + *integral;
+
+    // Start Rate PID and Booster portion a few cycles later, after the start clicks have
+    // been emitted this keeps the start smooth and predictable
+    if (d->start_counter_clicks == 0) 
+    {
+        // Rate P (Angle + Rate, rather than Angle-Rate Cascading)
+        *rate_p = kp2 * -d->gyro[1];
+
+        // No harsh changes in booster current (effective delay <= 100ms)
+        float temp_booster_current = calc_booster(d, booster_current, booster_angle, booster_ramp);
+        *out_booster_current = 0.01 * temp_booster_current + 0.99 * (*out_booster_current);
+        *rate_p += *out_booster_current;
+        new_pid_value += *rate_p;
+    }
+    else{
+        *rate_p = 0;
+    }
+
+    // Filtering current
+	new_pid_value = prev_current * (1.0 - out_filter) + new_pid_value * out_filter;
+
+	// Brake Amp Rate Limiting
+	if (d->motor.braking && (fabsf(new_pid_value - d->pid_value) > max_brake)) {
+		if (new_pid_value > d->pid_value) {
+			new_pid_value = d->pid_value + max_brake;
+		}
+		else {
+			new_pid_value = d->pid_value - max_brake;
+		}
+	}
+
+    return new_pid_value;
+}
+
 static void brake(data *d) {
     // Brake timeout logic
     float brake_timeout_length = 1;  // Brake Timeout hard-coded to 1s
@@ -1164,8 +1372,6 @@ static void refloat_thd(void *arg) {
             beep_off(d, false);
         }
 
-        float new_pid_value = 0;
-
         // Control Loop State Logic
         switch (d->state.state) {
         case (STATE_STARTUP):
@@ -1237,96 +1443,86 @@ static void refloat_thd(void *arg) {
                 }
             }
 
-            // Do PID maths
+            // Global PID params
             d->proportional = d->setpoint - d->balance_pitch;
-            bool tail_down = sign(d->proportional) != d->motor.erpm_sign;
+            d->true_proportional = d->setpoint - d->atr.braketilt_offset - d->pitch; 
+            d->abs_proportional = fabsf(d->true_proportional);
 
-            // Resume real PID maths
-            d->integral = d->integral + d->proportional * d->float_conf.ki;
+            // Calculate transition weights
+            calculate_transition_weights(d);
 
-            // Apply I term Filter
-            if (d->float_conf.ki_limit > 0 && fabsf(d->integral) > d->float_conf.ki_limit) {
-                d->integral = d->float_conf.ki_limit * sign(d->integral);
+            // Calculate tune A current
+            d->tuneA_current = calc_tune_out_current(d, d->float_conf.kp, d->float_conf.kp2, d->float_conf.ki, d->float_conf.ki_limit,
+                d->float_conf.booster_angle, d->float_conf.booster_ramp, d->float_conf.booster_current, 
+                d->float_conf.current_out_filter_a, d->float_conf.brake_max_amp_change_a, d->tuneA_current,
+                &d->integral_a, &d->rate_p_a, &d->tuneA_booster_current);
+            // Calculate tune B current
+            d->tuneB_current = calc_tune_out_current(d, d->float_conf.kp_b, d->float_conf.kp2_b, d->float_conf.ki_b, d->float_conf.ki_limit_b,
+                d->float_conf.booster_angle_b, d->float_conf.booster_ramp_b, d->float_conf.booster_current_b, 
+                d->float_conf.current_out_filter_b, d->float_conf.brake_max_amp_change_b, d->tuneB_current,
+                &d->integral_b, &d->rate_p_b, &d->tuneB_booster_current);
+            // Calculate tune C current
+            d->tuneC_current = calc_tune_out_current(d, d->float_conf.kp_c, d->float_conf.kp2_c, d->float_conf.ki_c, d->float_conf.ki_limit_c,
+                d->float_conf.booster_angle_c, d->float_conf.booster_ramp_c, d->float_conf.booster_current_c, 
+                d->float_conf.current_out_filter_c, d->float_conf.brake_max_amp_change_c, d->tuneC_current,
+                &d->integral_c, &d->rate_p_c, &d->tuneC_booster_current);
+
+            // Reset values if tune B disable
+            if (d->tuneB_weight_target == 0.0 && d->tuneB_weight == 0) {
+				d->tuneB_current = d->tuneA_current;
+				d->tuneB_booster_current = d->tuneA_booster_current;
+				d->integral_b = d->integral_a;
+			}
+            // Reset values if tune C disable
+			if (d->tuneC_weight_target == 0.0 && d->tuneC_weight == 0) {
+				d->tuneC_current = d->tuneA_current;
+				d->tuneC_booster_current = d->tuneA_booster_current;
+				d->integral_c = d->integral_a;
+			}
+
+			float new_output_current = 0;
+            // Calculate final output if traction loss isn't detected
+            if (!d->traction_control) {
+                // Blend between Tune A & Tune B & Tune C
+                new_output_current = d->tuneA_current;
+    			if (d->float_conf.transitions_order == ALL_TOGETHER) {
+	    			float tuneA_weight = 1.0;
+		    		float tuneB_weight = 0;
+			    	float tuneC_weight = 0;
+				    if (d->tuneB_weight > 0 || d->tuneC_weight) {
+					    float BC_weights = d->tuneB_weight + d->tuneC_weight;
+    					float tuneB_scaleBy = d->tuneB_weight / BC_weights;
+	    				float tuneC_scaleBy = d->tuneC_weight / BC_weights;
+		    			tuneB_weight = d->tuneB_weight * tuneB_scaleBy;
+			    		tuneC_weight = d->tuneC_weight * tuneC_scaleBy;
+				    	tuneA_weight = 1.0 - (tuneB_weight + tuneC_weight);
+    				}
+	    			new_output_current = d->tuneA_current * tuneA_weight + d->tuneB_current * tuneB_weight + d->tuneC_current * tuneC_weight;
+		    	}
+			    else if (d->float_conf.transitions_order == B_THEN_C) {
+				    new_output_current = d->tuneA_current * (1.0 - d->tuneB_weight) + d->tuneB_current * d->tuneB_weight;
+    				new_output_current = new_output_current * (1.0 - d->tuneC_weight) + d->tuneC_current * d->tuneC_weight;
+	    		}
+		    	else if (d->float_conf.transitions_order == C_THEN_B) {
+			    	new_output_current = d->tuneA_current * (1.0 - d->tuneC_weight) + d->tuneC_current * d->tuneC_weight;
+				    new_output_current = new_output_current * (1.0 - d->tuneB_weight) + d->tuneB_current * d->tuneB_weight;
+    			}
             }
-            // Quickly ramp down integral component during reverse stop
-            if (d->state.sat == SAT_REVERSESTOP) {
-                d->integral = d->integral * 0.9;
-            }
 
-            new_pid_value = d->float_conf.kp * d->proportional + d->integral;
-
-            // Start Rate PID and Booster portion a few cycles later, after the start clicks have
-            // been emitted this keeps the start smooth and predictable
-            if (d->start_counter_clicks == 0) {
-
-                // Rate P (Angle + Rate, rather than Angle-Rate Cascading)
-                float rate_prop = -d->gyro[1];
-
-                d->rate_p = d->float_conf.kp2 * rate_prop;
-
-                // Apply Booster (Now based on True Pitch)
-                // Braketilt excluded to allow for soft brakes that strengthen when near tail-drag
-                float true_proportional = d->setpoint - d->atr.braketilt_offset - d->pitch;
-                float abs_proportional = fabsf(true_proportional);
-
-                float booster_current, booster_angle, booster_ramp;
-                booster_current = d->float_conf.booster_current;
-                booster_angle = d->float_conf.booster_angle;
-                booster_ramp = d->float_conf.booster_ramp;
-
-                // Make booster a bit stronger at higher speed (up to 2x stronger when braking)
-                const int boost_min_erpm = 3000;
-                if (d->motor.abs_erpm > boost_min_erpm) {
-                    float speedstiffness = fminf(1, (d->motor.abs_erpm - boost_min_erpm) / 10000);
-                    if (tail_down) {
-                        // use higher current at speed when braking
-                        booster_current += booster_current * speedstiffness;
-                    } else {
-                        // when accelerating, we reduce the booster start angle as we get faster
-                        // strength remains unchanged
-                        float angledivider = 1 + speedstiffness;
-                        booster_angle /= angledivider;
-                    }
-                }
-
-                if (abs_proportional > booster_angle) {
-                    if (abs_proportional - booster_angle < booster_ramp) {
-                        booster_current *= sign(true_proportional) *
-                            ((abs_proportional - booster_angle) / booster_ramp);
-                    } else {
-                        booster_current *= sign(true_proportional);
-                    }
-                } else {
-                    booster_current = 0;
-                }
-
-                // No harsh changes in booster current (effective delay <= 100ms)
-                d->applied_booster_current =
-                    0.01 * booster_current + 0.99 * d->applied_booster_current;
-                d->rate_p += d->applied_booster_current;
-
-                if (d->softstart_pid_limit < d->mc_current_max) {
-                    d->rate_p = fminf(fabs(d->rate_p), d->softstart_pid_limit) * sign(d->rate_p);
-                    d->softstart_pid_limit += d->softstart_ramp_step_size;
-                }
-
-                new_pid_value += d->rate_p;
-            } else {
-                d->rate_p = 0;
-            }
+            // Filter output
+            d->pid_value = d->pid_value * 0.65 + new_output_current * 0.35;
 
             // Current Limiting!
             float current_limit = d->motor.braking ? d->mc_current_min : d->mc_current_max;
-            if (fabsf(new_pid_value) > current_limit) {
-                new_pid_value = sign(new_pid_value) * current_limit;
+            if (fabsf(d->pid_value) > current_limit) {
+                d->pid_value = sign(d->pid_value) * current_limit;
             }
 
-            if (d->traction_control) {
-                // freewheel while traction loss is detected
-                d->pid_value = 0;
-            } else {
-                d->pid_value = d->pid_value * 0.8 + new_pid_value * 0.2;
-            }
+			// Soft start
+			if (d->softstart_pid_limit < d->mc_current_max) {
+				d->pid_value = fminf(d->pid_value, d->softstart_pid_limit);
+				d->softstart_pid_limit += d->softstart_ramp_step_size;
+			}
 
             // Output to motor
             if (d->start_counter_clicks) {
@@ -1534,9 +1730,9 @@ static float app_get_debug(int index) {
     case (2):
         return d->proportional;
     case (3):
-        return d->integral;
+        return d->integral_a;
     case (4):
-        return d->rate_p;
+        return d->rate_p_a;
     case (5):
         return d->setpoint;
     case (6):
@@ -1616,7 +1812,7 @@ static void send_realtime_data(data *d) {
         buffer_append_float32_auto(buffer, d->charging.current, &ind);
         buffer_append_float32_auto(buffer, d->charging.voltage, &ind);
     } else {
-        buffer_append_float32_auto(buffer, d->applied_booster_current, &ind);
+        buffer_append_float32_auto(buffer, d->tuneA_booster_current, &ind);
         buffer_append_float32_auto(buffer, d->motor.current, &ind);
     }
     buffer_append_float32_auto(buffer, d->throttle_val, &ind);
@@ -1667,7 +1863,7 @@ static void cmd_send_all_data(data *d, unsigned char mode) {
         buffer[ind++] = d->inputtilt_interpolated * 5 + 128;
 
         buffer_append_float16(buffer, d->pitch, 10, &ind);
-        buffer[ind++] = d->applied_booster_current + 128;
+        buffer[ind++] = d->tuneA_booster_current + 128;
 
         // Now send motor stuff:
         buffer_append_float16(buffer, VESC_IF->mc_get_input_voltage_filtered(), 10, &ind);
@@ -2243,7 +2439,7 @@ void flywheel_stop(data *d) {
 }
 
 static void send_realtime_data2(data *d) {
-    static const int bufsize = 75;
+    static const int bufsize = 100;
     uint8_t buffer[bufsize];
     int32_t ind = 0;
 
@@ -2290,11 +2486,17 @@ static void send_realtime_data2(data *d) {
         buffer_append_float32_auto(buffer, d->inputtilt_interpolated, &ind);
 
         // DEBUG
+        buffer_append_float32_auto(buffer, d->tuneA_current, &ind);
+        buffer_append_float32_auto(buffer, d->tuneB_current, &ind);
+        buffer_append_float32_auto(buffer, d->tuneC_current, &ind);
+        buffer_append_float32_auto(buffer, d->tuneA_booster_current, &ind);
+        buffer_append_float32_auto(buffer, d->tuneB_booster_current, &ind);
+        buffer_append_float32_auto(buffer, d->tuneC_booster_current, &ind);
+
         buffer_append_float32_auto(buffer, d->pid_value, &ind);
         buffer_append_float32_auto(buffer, d->motor.atr_filtered_current, &ind);
         buffer_append_float32_auto(buffer, d->atr.accel_diff, &ind);
         buffer_append_float32_auto(buffer, d->atr.speed_boost, &ind);
-        buffer_append_float32_auto(buffer, d->applied_booster_current, &ind);
     }
 
     if (d->state.charging) {
