@@ -141,12 +141,30 @@ typedef struct {
     CfgHwLeds leds;
 } CfgHardware;
 
+typedef enum {
+	NO_TUNE_B = 0,
+	ACCELERATION_BASED = 1,
+	ERPM_BASED = 2
+} TUNES_MIXING_MODE;
+
+typedef enum {
+	ALL_TOGETHER = 0,
+	B_THEN_C = 1,
+	C_THEN_B = 2
+} TRANSITIONS_ORDER_MODE;
+
 typedef struct {
     float version;
     bool disabled;
     float kp;
+    float kp_b;
+    float kp_c;
     float ki;
+    float ki_b;
+    float ki_c;
     float kp2;
+    float kp2_b;
+    float kp2_c;
     float mahony_kp;
     float mahony_kp_roll;
     float mahony_kp_yaw;
@@ -198,9 +216,17 @@ typedef struct {
     bool startup_dirtylandings_enabled;
     float brake_current;
     float ki_limit;
+    float ki_limit_b;
+    float ki_limit_c;
     float booster_angle;
+    float booster_angle_b;
+    float booster_angle_c;
     float booster_ramp;
+    float booster_ramp_b;
+    float booster_ramp_c;
     float booster_current;
+    float booster_current_b;
+    float booster_current_c;
     float torquetilt_start_current;
     float torquetilt_angle_limit;
     float torquetilt_on_speed;
@@ -237,9 +263,32 @@ typedef struct {
     bool is_surgebeep_enabled;
     float surge_duty_start;
     float surge_angle;
-
     CfgLeds leds;
     CfgHardware hardware;
+
+	float brake_max_amp_change_a;
+	float brake_max_amp_change_b;
+	float brake_max_amp_change_c;
+	float current_out_filter_a;
+	float current_out_filter_b;
+	float current_out_filter_c;
+	TRANSITIONS_ORDER_MODE transitions_order;
+	TUNES_MIXING_MODE tunes_mixing_b;
+	TUNES_MIXING_MODE tunes_mixing_c;
+	float tune_a_transition_speed;
+	float tune_b_transition_speed;
+	float tune_c_transition_speed;
+	bool tune_b_only_for_brakes;
+	bool tune_c_only_for_brakes;
+	float asym_min_accel_b;
+	float asym_max_accel_b;
+	uint16_t asym_min_erpm_b;
+	uint16_t asym_max_erpm_b;
+	float asym_min_accel_c;
+	float asym_max_accel_c;
+	uint16_t asym_min_erpm_c;
+	uint16_t asym_max_erpm_c;
+
 } RefloatConfig;
 
 // DATATYPES_H_
