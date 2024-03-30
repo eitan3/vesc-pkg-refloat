@@ -90,20 +90,20 @@ typedef enum {
 } LedTransition;
 
 typedef struct {
+    LedMode mode;
     float brightness;
     LedColor color1;
     LedColor color2;
-    LedMode mode;
     float speed;
 } LedBar;
 
 typedef struct {
-    uint16_t idle_timeout;
+    float brightness_headlights_off;
+    float brightness_headlights_on;
+    bool show_sensors_while_running;
     float duty_threshold;
     float red_bar_percentage;
-    bool show_sensors_while_running;
-    float brightness_headlights_on;
-    float brightness_headlights_off;
+    uint16_t idle_timeout;
 } StatusBar;
 
 typedef struct {
@@ -142,20 +142,18 @@ typedef struct {
 } CfgHardware;
 
 typedef enum {
-	NO_TUNE_B = 0,
-	ACCELERATION_BASED = 1,
-	ERPM_BASED = 2
+    NO_TUNE_B = 0,
+    ACCELERATION_BASED = 1,
+    ERPM_BASED = 2
 } TUNES_MIXING_MODE;
 
 typedef enum {
-	ALL_TOGETHER = 0,
-	B_THEN_C = 1,
-	C_THEN_B = 2
+    ALL_TOGETHER = 0,
+    B_THEN_C = 1,
+    C_THEN_B = 2
 } TRANSITIONS_ORDER_MODE;
 
 typedef struct {
-    float version;
-    bool disabled;
     float kp;
     float kp_b;
     float kp_c;
@@ -174,6 +172,7 @@ typedef struct {
     float fault_roll;
     float fault_adc1;
     float fault_adc2;
+    bool is_footbeep_enabled;
     uint16_t fault_delay_pitch;
     uint16_t fault_delay_roll;
     uint16_t fault_delay_switch_half;
@@ -186,6 +185,10 @@ typedef struct {
     float tiltback_duty_angle;
     float tiltback_duty_speed;
     float tiltback_duty;
+    bool is_dutybeep_enabled;
+    float surge_angle;
+    float surge_duty_start;
+    bool is_surgebeep_enabled;
     float tiltback_hv_angle;
     float tiltback_hv_speed;
     float tiltback_hv;
@@ -198,15 +201,15 @@ typedef struct {
     float tiltback_variable;
     float tiltback_variable_max;
     uint16_t tiltback_variable_erpm;
+    float noseangling_speed;
     FLOAT_INPUTTILT_REMOTE_TYPE inputtilt_remote_type;
     float inputtilt_speed;
     float inputtilt_angle_limit;
-    uint16_t inputtilt_smoothing_factor;
+    uint8_t inputtilt_smoothing_factor;
     bool inputtilt_invert_throttle;
     float inputtilt_deadband;
     float remote_throttle_current_max;
     float remote_throttle_grace_period;
-    float noseangling_speed;
     float startup_pitch_tolerance;
     float startup_roll_tolerance;
     float startup_speed;
@@ -233,6 +236,14 @@ typedef struct {
     float torquetilt_off_speed;
     float torquetilt_strength;
     float torquetilt_strength_regen;
+    float turntilt_strength;
+    float turntilt_angle_limit;
+    float turntilt_start_angle;
+    uint16_t turntilt_start_erpm;
+    float turntilt_speed;
+    uint16_t turntilt_erpm_boost;
+    uint16_t turntilt_erpm_boost_end;
+    uint16_t turntilt_yaw_aggregate;
     float atr_strength_up;
     float atr_strength_down;
     float atr_threshold_up;
@@ -248,47 +259,33 @@ typedef struct {
     float atr_amps_decel_ratio;
     float braketilt_strength;
     float braketilt_lingering;
-    float turntilt_strength;
-    float turntilt_angle_limit;
-    float turntilt_start_angle;
-    uint16_t turntilt_start_erpm;
-    float turntilt_speed;
-    uint16_t turntilt_erpm_boost;
-    uint16_t turntilt_erpm_boost_end;
-    int turntilt_yaw_aggregate;
-    float dark_pitch_offset;
-    bool is_beeper_enabled;
-    bool is_dutybeep_enabled;
-    bool is_footbeep_enabled;
-    bool is_surgebeep_enabled;
-    float surge_duty_start;
-    float surge_angle;
     CfgLeds leds;
     CfgHardware hardware;
-
-	float brake_max_amp_change_a;
-	float brake_max_amp_change_b;
-	float brake_max_amp_change_c;
-	float current_out_filter_a;
-	float current_out_filter_b;
-	float current_out_filter_c;
-	TRANSITIONS_ORDER_MODE transitions_order;
-	TUNES_MIXING_MODE tunes_mixing_b;
-	TUNES_MIXING_MODE tunes_mixing_c;
-	float tune_a_transition_speed;
-	float tune_b_transition_speed;
-	float tune_c_transition_speed;
-	bool tune_b_only_for_brakes;
-	bool tune_c_only_for_brakes;
-	float asym_min_accel_b;
-	float asym_max_accel_b;
-	uint16_t asym_min_erpm_b;
-	uint16_t asym_max_erpm_b;
-	float asym_min_accel_c;
-	float asym_max_accel_c;
-	uint16_t asym_min_erpm_c;
-	uint16_t asym_max_erpm_c;
-
+    float dark_pitch_offset;
+    bool is_beeper_enabled;
+    bool disabled;
+    float brake_max_amp_change_a;
+    float brake_max_amp_change_b;
+    float brake_max_amp_change_c;
+    float current_out_filter_a;
+    float current_out_filter_b;
+    float current_out_filter_c;
+    TRANSITIONS_ORDER_MODE transitions_order;
+    TUNES_MIXING_MODE tunes_mixing_b;
+    TUNES_MIXING_MODE tunes_mixing_c;
+    float tune_a_transition_speed;
+    float tune_b_transition_speed;
+    float tune_c_transition_speed;
+    bool tune_b_only_for_brakes;
+    bool tune_c_only_for_brakes;
+    float asym_min_accel_b;
+    float asym_max_accel_b;
+    uint16_t asym_min_erpm_b;
+    uint16_t asym_max_erpm_b;
+    float asym_min_accel_c;
+    float asym_max_accel_c;
+    uint16_t asym_min_erpm_c;
+    uint16_t asym_max_erpm_c;
 } RefloatConfig;
 
 // DATATYPES_H_
